@@ -1,4 +1,4 @@
-import { count, eq, isNull } from "drizzle-orm";
+import { and, count, eq, isNull } from "drizzle-orm";
 
 import type { dbClient } from "@kan/db/client";
 import { comments } from "@kan/db/schema";
@@ -47,7 +47,7 @@ export const getByPublicId = (db: dbClient, publicId: string) => {
       createdBy: true,
       cardId: true,
     },
-    where: eq(comments.publicId, publicId),
+    where: and(eq(comments.publicId, publicId), isNull(comments.deletedAt)),
   });
 };
 

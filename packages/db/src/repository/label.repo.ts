@@ -71,6 +71,9 @@ export const getAllByPublicIds = (db: dbClient, labelPublicIds: string[]) => {
   return db.query.labels.findMany({
     columns: {
       id: true,
+      publicId: true,
+      name: true,
+      colourCode: true,
     },
     where: inArray(labels.publicId, labelPublicIds),
   });

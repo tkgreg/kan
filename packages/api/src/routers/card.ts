@@ -95,6 +95,17 @@ export const cardRouter = createTRPCRouter({
           code: "INTERNAL_SERVER_ERROR",
         });
 
+      let attachedLabels: {
+        publicId: string;
+        name: string;
+        colourCode: string | null;
+      }[] = [];
+      let attachedMembers: {
+        publicId: string;
+        email: string;
+        user: { name: string | null } | null;
+      }[] = [];
+
       if (newCardId && input.labelPublicIds.length) {
         const labels = await labelRepo.getAllByPublicIds(
           ctx.db,
@@ -131,6 +142,8 @@ export const cardRouter = createTRPCRouter({
         }));
 
         await cardActivityRepo.bulkCreate(ctx.db, cardActivitesInsert);
+
+        attachedLabels = labels;
       }
 
       if (newCardId && input.memberPublicIds.length) {
@@ -170,6 +183,8 @@ export const cardRouter = createTRPCRouter({
         }));
 
         await cardActivityRepo.bulkCreate(ctx.db, cardActivitesInsert);
+
+        attachedMembers = members;
       }
 
       if (input.description) {
@@ -183,30 +198,60 @@ export const cardRouter = createTRPCRouter({
         });
       }
 
-      // Fire webhooks (non-blocking)
-      sendWebhooksForWorkspace(
-        ctx.db,
-        list.workspaceId,
-        createCardWebhookPayload(
-          "card.created",
-          {
-            id: String(newCard.id),
-            publicId: newCard.publicId,
-            title: input.title,
-            description: input.description,
-            dueDate: input.dueDate ?? null,
-            listId: list.publicId,
-          },
-          {
-            boardId: list.boardPublicId,
-            boardName: list.boardName,
-            listName: list.name,
-            user: ctx.user
-              ? { id: ctx.user.id, name: ctx.user.name }
-              : undefined,
-          },
-        ),
-      ).catch((error) => {
+      // Fire webhooks (non-blocking): card.created first, then one
+      // card.label.added / card.member.added per initial attachment
+      const webhookCard = {
+        id: String(newCard.id),
+        publicId: newCard.publicId,
+        title: input.title,
+        description: input.description,
+        dueDate: input.dueDate ?? null,
+        listId: list.publicId,
+      };
+      const webhookContext = {
+        boardId: list.boardPublicId,
+        boardName: list.boardName,
+        listName: list.name,
+        user: ctx.user ? { id: ctx.user.id, name: ctx.user.name } : undefined,
+      };
+
+      (async () => {
+        await sendWebhooksForWorkspace(
+          ctx.db,
+          list.workspaceId,
+          createCardWebhookPayload("card.created", webhookCard, webhookContext),
+        );
+
+        for (const label of attachedLabels) {
+          await sendWebhooksForWorkspace(
+            ctx.db,
+            list.workspaceId,
+            createCardWebhookPayload("card.label.added", webhookCard, {
+              ...webhookContext,
+              label: {
+                id: label.publicId,
+                name: label.name,
+                colourCode: label.colourCode,
+              },
+            }),
+          );
+        }
+
+        for (const member of attachedMembers) {
+          await sendWebhooksForWorkspace(
+            ctx.db,
+            list.workspaceId,
+            createCardWebhookPayload("card.member.added", webhookCard, {
+              ...webhookContext,
+              member: {
+                id: member.publicId,
+                name: member.user?.name ?? null,
+                email: member.email,
+              },
+            }),
+          );
+        }
+      })().catch((error) => {
         console.error("Webhook delivery failed:", error);
       });
 
@@ -285,6 +330,37 @@ export const cardRouter = createTRPCRouter({
         commentId: newComment.id,
       }).catch((error) => {
         console.error("Failed to send mention emails:", error);
+      });
+
+      // Fire webhooks (non-blocking)
+      sendWebhooksForWorkspace(
+        ctx.db,
+        card.workspaceId,
+        createCardWebhookPayload(
+          "card.comment.created",
+          {
+            id: String(card.id),
+            publicId: input.cardPublicId,
+            title: card.title,
+            description: card.description,
+            dueDate: card.dueDate,
+            listId: card.listPublicId,
+          },
+          {
+            boardId: card.boardPublicId,
+            boardName: card.boardName,
+            listName: card.listName,
+            user: ctx.user
+              ? { id: ctx.user.id, name: ctx.user.name }
+              : undefined,
+            comment: {
+              id: newComment.publicId,
+              text: newComment.comment,
+            },
+          },
+        ),
+      ).catch((error) => {
+        console.error("Webhook delivery failed:", error);
       });
 
       return newComment;
@@ -377,6 +453,43 @@ export const cardRouter = createTRPCRouter({
         console.error("Failed to send mention emails:", error);
       });
 
+      // Fire webhooks (non-blocking)
+      sendWebhooksForWorkspace(
+        ctx.db,
+        card.workspaceId,
+        createCardWebhookPayload(
+          "card.comment.updated",
+          {
+            id: String(card.id),
+            publicId: input.cardPublicId,
+            title: card.title,
+            description: card.description,
+            dueDate: card.dueDate,
+            listId: card.listPublicId,
+          },
+          {
+            boardId: card.boardPublicId,
+            boardName: card.boardName,
+            listName: card.listName,
+            user: ctx.user
+              ? { id: ctx.user.id, name: ctx.user.name }
+              : undefined,
+            comment: {
+              id: updatedComment.publicId,
+              text: updatedComment.comment,
+            },
+            changes: {
+              comment: {
+                from: existingComment.comment,
+                to: updatedComment.comment,
+              },
+            },
+          },
+        ),
+      ).catch((error) => {
+        console.error("Webhook delivery failed:", error);
+      });
+
       return updatedComment;
     }),
   deleteComment: protectedProcedure
@@ -454,6 +567,37 @@ export const cardRouter = createTRPCRouter({
         createdBy: userId,
       });
 
+      // Fire webhooks (non-blocking)
+      sendWebhooksForWorkspace(
+        ctx.db,
+        card.workspaceId,
+        createCardWebhookPayload(
+          "card.comment.deleted",
+          {
+            id: String(card.id),
+            publicId: input.cardPublicId,
+            title: card.title,
+            description: card.description,
+            dueDate: card.dueDate,
+            listId: card.listPublicId,
+          },
+          {
+            boardId: card.boardPublicId,
+            boardName: card.boardName,
+            listName: card.listName,
+            user: ctx.user
+              ? { id: ctx.user.id, name: ctx.user.name }
+              : undefined,
+            comment: {
+              id: input.commentPublicId,
+              text: existingComment.comment,
+            },
+          },
+        ),
+      ).catch((error) => {
+        console.error("Webhook delivery failed:", error);
+      });
+
       return { publicId: input.commentPublicId };
     }),
   addOrRemoveLabel: protectedProcedure
@@ -528,6 +672,38 @@ export const cardRouter = createTRPCRouter({
           createdBy: userId,
         });
 
+        // Fire webhooks (non-blocking)
+        sendWebhooksForWorkspace(
+          ctx.db,
+          card.workspaceId,
+          createCardWebhookPayload(
+            "card.label.removed",
+            {
+              id: String(card.id),
+              publicId: input.cardPublicId,
+              title: card.title,
+              description: card.description,
+              dueDate: card.dueDate,
+              listId: card.listPublicId,
+            },
+            {
+              boardId: card.boardPublicId,
+              boardName: card.boardName,
+              listName: card.listName,
+              user: ctx.user
+                ? { id: ctx.user.id, name: ctx.user.name }
+                : undefined,
+              label: {
+                id: label.publicId,
+                name: label.name,
+                colourCode: label.colourCode,
+              },
+            },
+          ),
+        ).catch((error) => {
+          console.error("Webhook delivery failed:", error);
+        });
+
         return { newLabel: false };
       }
 
@@ -545,6 +721,38 @@ export const cardRouter = createTRPCRouter({
         cardId: card.id,
         labelId: label.id,
         createdBy: userId,
+      });
+
+      // Fire webhooks (non-blocking)
+      sendWebhooksForWorkspace(
+        ctx.db,
+        card.workspaceId,
+        createCardWebhookPayload(
+          "card.label.added",
+          {
+            id: String(card.id),
+            publicId: input.cardPublicId,
+            title: card.title,
+            description: card.description,
+            dueDate: card.dueDate,
+            listId: card.listPublicId,
+          },
+          {
+            boardId: card.boardPublicId,
+            boardName: card.boardName,
+            listName: card.listName,
+            user: ctx.user
+              ? { id: ctx.user.id, name: ctx.user.name }
+              : undefined,
+            label: {
+              id: label.publicId,
+              name: label.name,
+              colourCode: label.colourCode,
+            },
+          },
+        ),
+      ).catch((error) => {
+        console.error("Webhook delivery failed:", error);
       });
 
       return { newLabel: true };
@@ -593,7 +801,7 @@ export const cardRouter = createTRPCRouter({
         input.workspaceMemberPublicId,
       );
 
-      if (!member)
+      if (!member || member.workspaceId !== card.workspaceId)
         throw new TRPCError({
           message: `Member with public ID ${input.workspaceMemberPublicId} not found`,
           code: "NOT_FOUND",
@@ -626,6 +834,38 @@ export const cardRouter = createTRPCRouter({
           createdBy: userId,
         });
 
+        // Fire webhooks (non-blocking)
+        sendWebhooksForWorkspace(
+          ctx.db,
+          card.workspaceId,
+          createCardWebhookPayload(
+            "card.member.removed",
+            {
+              id: String(card.id),
+              publicId: input.cardPublicId,
+              title: card.title,
+              description: card.description,
+              dueDate: card.dueDate,
+              listId: card.listPublicId,
+            },
+            {
+              boardId: card.boardPublicId,
+              boardName: card.boardName,
+              listName: card.listName,
+              user: ctx.user
+                ? { id: ctx.user.id, name: ctx.user.name }
+                : undefined,
+              member: {
+                id: member.publicId,
+                name: member.user?.name ?? null,
+                email: member.email,
+              },
+            },
+          ),
+        ).catch((error) => {
+          console.error("Webhook delivery failed:", error);
+        });
+
         return { newMember: false };
       }
 
@@ -643,6 +883,38 @@ export const cardRouter = createTRPCRouter({
         cardId: card.id,
         workspaceMemberId: member.id,
         createdBy: userId,
+      });
+
+      // Fire webhooks (non-blocking)
+      sendWebhooksForWorkspace(
+        ctx.db,
+        card.workspaceId,
+        createCardWebhookPayload(
+          "card.member.added",
+          {
+            id: String(card.id),
+            publicId: input.cardPublicId,
+            title: card.title,
+            description: card.description,
+            dueDate: card.dueDate,
+            listId: card.listPublicId,
+          },
+          {
+            boardId: card.boardPublicId,
+            boardName: card.boardName,
+            listName: card.listName,
+            user: ctx.user
+              ? { id: ctx.user.id, name: ctx.user.name }
+              : undefined,
+            member: {
+              id: member.publicId,
+              name: member.user?.name ?? null,
+              email: member.email,
+            },
+          },
+        ),
+      ).catch((error) => {
+        console.error("Webhook delivery failed:", error);
       });
 
       return { newMember: true };

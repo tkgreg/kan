@@ -330,8 +330,19 @@ export const getMemberByPublicId = (db: dbClient, memberPublicId: string) => {
   return db.query.workspaceMembers.findFirst({
     columns: {
       id: true,
+      publicId: true,
+      email: true,
+      workspaceId: true,
     },
-    where: eq(workspaceMembers.publicId, memberPublicId),
+    with: {
+      user: {
+        columns: { name: true },
+      },
+    },
+    where: and(
+      eq(workspaceMembers.publicId, memberPublicId),
+      isNull(workspaceMembers.deletedAt),
+    ),
   });
 };
 
@@ -342,6 +353,13 @@ export const getAllMembersByPublicIds = (
   return db.query.workspaceMembers.findMany({
     columns: {
       id: true,
+      publicId: true,
+      email: true,
+    },
+    with: {
+      user: {
+        columns: { name: true },
+      },
     },
     where: inArray(workspaceMembers.publicId, memberPublicIds),
   });

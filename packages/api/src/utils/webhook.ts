@@ -35,6 +35,20 @@ export interface WebhookPayload {
       id: string;
       name: string | null;
     };
+    comment?: {
+      id: string;
+      text: string;
+    };
+    label?: {
+      id: string;
+      name: string;
+      colourCode?: string | null;
+    };
+    member?: {
+      id: string;
+      name?: string | null;
+      email?: string;
+    };
     changes?: Record<string, { from: unknown; to: unknown }>;
   };
 }
@@ -236,6 +250,20 @@ export function createCardWebhookPayload(
       id: string;
       name: string | null;
     };
+    comment?: {
+      id: string;
+      text: string;
+    };
+    label?: {
+      id: string;
+      name: string;
+      colourCode?: string | null;
+    };
+    member?: {
+      id: string;
+      name?: string | null;
+      email?: string;
+    };
     changes?: Record<string, { from: unknown; to: unknown }>;
   },
 ): WebhookPayload {
@@ -259,6 +287,9 @@ export function createCardWebhookPayload(
         ? { id: card.listId, name: context.listName }
         : undefined,
       user: context.user,
+      comment: context.comment,
+      label: context.label,
+      member: context.member,
       changes: context.changes,
     },
   };

@@ -202,6 +202,131 @@ describe("webhook utilities", () => {
         listId: { from: "list-public-backlog", to: "list-public-done" },
       });
     });
+
+    it("includes comment context for comment events", () => {
+      const payload = createCardWebhookPayload(
+        "card.comment.created",
+        {
+          id: "card-123",
+          publicId: "card-pub-123",
+          title: "Test Card",
+          listId: "list-456",
+        },
+        {
+          boardId: "board-789",
+          comment: {
+            id: "comment-pub-1",
+            text: "Looks good to me",
+          },
+        },
+      );
+
+      expect(payload.event).toBe("card.comment.created");
+      expect(payload.data.comment).toEqual({
+        id: "comment-pub-1",
+        text: "Looks good to me",
+      });
+    });
+
+    it("includes comment changes for card.comment.updated events", () => {
+      const payload = createCardWebhookPayload(
+        "card.comment.updated",
+        {
+          id: "card-123",
+          publicId: "card-pub-123",
+          title: "Test Card",
+          listId: "list-456",
+        },
+        {
+          boardId: "board-789",
+          comment: {
+            id: "comment-pub-1",
+            text: "Updated text",
+          },
+          changes: {
+            comment: { from: "Original text", to: "Updated text" },
+          },
+        },
+      );
+
+      expect(payload.data.comment?.text).toBe("Updated text");
+      expect(payload.data.changes).toEqual({
+        comment: { from: "Original text", to: "Updated text" },
+      });
+    });
+
+    it("includes label context for label events", () => {
+      const payload = createCardWebhookPayload(
+        "card.label.added",
+        {
+          id: "card-123",
+          publicId: "card-pub-123",
+          title: "Test Card",
+          listId: "list-456",
+        },
+        {
+          boardId: "board-789",
+          label: {
+            id: "label-pub-1",
+            name: "Bug",
+            colourCode: "#ff0000",
+          },
+        },
+      );
+
+      expect(payload.event).toBe("card.label.added");
+      expect(payload.data.label).toEqual({
+        id: "label-pub-1",
+        name: "Bug",
+        colourCode: "#ff0000",
+      });
+    });
+
+    it("includes member context for member events", () => {
+      const payload = createCardWebhookPayload(
+        "card.member.added",
+        {
+          id: "card-123",
+          publicId: "card-pub-123",
+          title: "Test Card",
+          listId: "list-456",
+        },
+        {
+          boardId: "board-789",
+          member: {
+            id: "member-pub-1",
+            name: "Jane Doe",
+            email: "jane@example.com",
+          },
+        },
+      );
+
+      expect(payload.event).toBe("card.member.added");
+      expect(payload.data.member).toEqual({
+        id: "member-pub-1",
+        name: "Jane Doe",
+        email: "jane@example.com",
+      });
+    });
+
+    it("omits comment, label, and member context when not provided", () => {
+      const payload = createCardWebhookPayload(
+        "card.created",
+        {
+          id: "card-123",
+          publicId: "card-pub-123",
+          title: "Test Card",
+          listId: "list-456",
+        },
+        {
+          boardId: "board-789",
+        },
+      );
+
+      expect(payload.data.comment).toBeUndefined();
+      expect(payload.data.label).toBeUndefined();
+      expect(payload.data.member).toBeUndefined();
+    });
   });
 
   describe("sendWebhookToUrl", () => {
@@ -526,6 +651,45 @@ describe("webhook utilities", () => {
       await sendWebhooksForWorkspace(mockDb, 1, mockPayload);
 
       expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it("only sends new event types to webhooks subscribed to them", async () => {
+      mockGetActiveByWorkspaceId.mockResolvedValue([
+        {
+          id: 1,
+          publicId: "wh-1",
+          url: "https://example.com/cards-only",
+          secret: null,
+          events: ["card.created", "card.updated"],
+          active: true,
+        },
+        {
+          id: 2,
+          publicId: "wh-2",
+          url: "https://example.com/comments",
+          secret: null,
+          events: ["card.comment.created", "card.label.added", "card.member.added"],
+          active: true,
+        },
+      ]);
+
+      (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ok: true,
+        status: 200,
+      });
+
+      const commentPayload: WebhookPayload = {
+        ...mockPayload,
+        event: "card.comment.created",
+      };
+
+      await sendWebhooksForWorkspace(mockDb, 1, commentPayload);
+
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+      expect(global.fetch).toHaveBeenCalledWith(
+        "https://example.com/comments",
+        expect.any(Object),
+      );
     });
 
     it("catches and logs DB errors without throwing", async () => {

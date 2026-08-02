@@ -19,6 +19,13 @@ export const webhookEvents = [
   "card.updated",
   "card.moved",
   "card.deleted",
+  "card.comment.created",
+  "card.comment.updated",
+  "card.comment.deleted",
+  "card.label.added",
+  "card.label.removed",
+  "card.member.added",
+  "card.member.removed",
 ] as const;
 export type WebhookEvent = (typeof webhookEvents)[number];
 

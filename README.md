@@ -27,7 +27,7 @@ The webhook settings UI picks the new events up automatically, and existing webh
 
 ## Docker images 🐳
 
-Prebuilt multi-arch (amd64/arm64) images of this fork are published to Docker Hub on every release:
+Prebuilt amd64 images of this fork are published to Docker Hub on every release:
 
 - [`tkgreg/kan`](https://hub.docker.com/r/tkgreg/kan) — the web application
 - [`tkgreg/kan-migrate`](https://hub.docker.com/r/tkgreg/kan-migrate) — run-once database migration container
